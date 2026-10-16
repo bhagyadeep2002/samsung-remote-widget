@@ -11,6 +11,15 @@ settings:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
 
+schemes:
+  SamsungTVRemote:
+    build:
+      targets:
+        SamsungTVRemote: all
+    test:
+      targets:
+        - RemoteConnectionTests
+
 targets:
   SamsungTVRemote:
     type: application
@@ -18,12 +27,10 @@ targets:
     sources:
       - Sources/Shared
       - Sources/App
-    dependencies:
-      - target: SamsungTVWidget
-        embed: true
-        link: false
     info:
+      path: Config/SamsungTVRemote-Info.plist
       properties:
+        LSUIElement: true
         LSApplicationCategoryType: public.app-category.utilities
         NSLocalNetworkUsageDescription: Connect to your Samsung TV on your home network to pair and send remote commands.
     entitlements:
@@ -31,36 +38,27 @@ targets:
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
-        com.apple.security.application-groups:
-          - group.com.indigital.samsungtvremote
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.indigital.samsungtvremote
         PRODUCT_NAME: Samsung TV Remote
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 43S9G46H25
         ENABLE_HARDENED_RUNTIME: YES
 
-  SamsungTVWidget:
-    type: app-extension
+  RemoteConnectionTests:
+    type: bundle.unit-test
     platform: macOS
     sources:
-      - Sources/Shared
-      - Sources/Widget
-    info:
-      properties:
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.widgetkit-extension
-    entitlements:
-      path: Config/SamsungTVWidget.entitlements
-      properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.network.client: true
-        com.apple.security.application-groups:
-          - group.com.indigital.samsungtvremote
+      - Tests
+      - Sources/Shared/PersistentRemoteConnection.swift
+      - Sources/Shared/TVNumberPadNavigation.swift
+      - Sources/Shared/SamsungRemoteKey.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.indigital.samsungtvremote.widget
-        PRODUCT_NAME: SamsungTVWidget
-        APPLICATION_EXTENSION_API_ONLY: YES
-        SKIP_INSTALL: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.indigital.samsungtvremote.connectiontests
+        GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 43S9G46H25

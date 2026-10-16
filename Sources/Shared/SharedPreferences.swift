@@ -1,8 +1,7 @@
 import Foundation
 
 enum SharedPreferences {
-    static let appGroup = "group.com.indigital.samsungtvremote"
-    static let defaults = UserDefaults(suiteName: appGroup)!
+    static let defaults = UserDefaults.standard
 
     private enum Key {
         static let host = "tvHost"

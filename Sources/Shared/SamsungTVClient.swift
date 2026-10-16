@@ -5,9 +5,29 @@ import Security
 enum SamsungTVClient {
     private static let pairingTimeout: TimeInterval = 45
     private static let commandTimeout: TimeInterval = 10
+    private static let remote = PersistentRemoteConnection { host in
+        try await authenticatedConnection(host: host)
+    }
+    private static let controls = TVRemoteControlSession { steps in
+        let host = try normalizedHost(SharedPreferences.host)
+        let commands = try steps.map { step in
+            RemoteCommandStep(message: try message(for: step.key), delayAfter: step.delayAfter)
+        }
+        try await remote.send(commands, host: host)
+    }
+
+    static func prepare() async throws {
+        try await remote.prepare(host: normalizedHost(SharedPreferences.host))
+    }
+
+    static func disconnect() async {
+        await controls.reset()
+        await remote.disconnect()
+    }
 
     static func pair(with hostInput: String) async throws {
         let host = try normalizedHost(hostInput)
+        await disconnect()
         let existingPin = try PairingCredentialStore.certificatePin(for: host)
         let connection = try makeConnection(
             host: host,
@@ -15,7 +35,8 @@ enum SamsungTVClient {
             certificatePin: existingPin,
             allowFirstUse: existingPin == nil
         )
-        defer { connection.close() }
+        var retained = false
+        defer { if !retained { connection.close() } }
 
         SharedPreferences.saveStatus("Approve the connection request on your TV.")
         guard let token = try await waitForChannel(
@@ -32,30 +53,21 @@ enum SamsungTVClient {
             certificatePin: certificatePin,
             for: host
         )
-        SharedPreferences.saveStatus("Paired. Add the Samsung TV Remote widget.")
+        try Task.checkCancellation()
+        await remote.adopt(connection, host: host)
+        retained = true
+        SharedPreferences.saveStatus("Paired. Your remote is ready.")
     }
 
     static func send(_ key: SamsungRemoteKey) async throws {
-        let host = try normalizedHost(SharedPreferences.host)
-        guard let token = try PairingCredentialStore.token(for: host),
-              let certificatePin = try PairingCredentialStore.certificatePin(for: host) else {
-            throw SamsungTVError.notPaired
-        }
+        try await controls.perform(.key(key))
+    }
 
-        let connection = try makeConnection(
-            host: host,
-            token: token,
-            certificatePin: certificatePin,
-            allowFirstUse: false
-        )
-        defer { connection.close() }
+    static func perform(_ action: TVRemoteAction) async throws {
+        try await controls.perform(action)
+    }
 
-        _ = try await waitForChannel(
-            connection.task,
-            timeout: commandTimeout,
-            pairing: false
-        )
-
+    private static func message(for key: SamsungRemoteKey) throws -> String {
         let payload: [String: Any] = [
             "method": "ms.remote.control",
             "params": [
@@ -69,7 +81,25 @@ enum SamsungTVClient {
         guard let message = String(data: data, encoding: .utf8) else {
             throw SamsungTVError.invalidCommand
         }
-        try await connection.task.send(.string(message))
+        return message
+    }
+
+    private static func authenticatedConnection(host: String) async throws -> WebSocketConnection {
+        guard let token = try PairingCredentialStore.token(for: host),
+              let certificatePin = try PairingCredentialStore.certificatePin(for: host) else {
+            throw SamsungTVError.notPaired
+        }
+        let connection = try makeConnection(
+            host: host, token: token, certificatePin: certificatePin, allowFirstUse: false
+        )
+        do {
+            _ = try await waitForChannel(connection.task, timeout: commandTimeout, pairing: false)
+            try Task.checkCancellation()
+            return connection
+        } catch {
+            connection.close()
+            throw error
+        }
     }
 
     private static func makeConnection(
@@ -139,27 +169,31 @@ enum SamsungTVClient {
         timeout: TimeInterval,
         pairing: Bool
     ) async throws -> String? {
-        try await withThrowingTaskGroup(of: String?.self) { group in
-            group.addTask {
-                try await receiveChannelToken(from: task, pairing: pairing)
-            }
-            group.addTask {
-                let nanos = UInt64(timeout * 1_000_000_000)
-                try await Task.sleep(nanoseconds: nanos)
-                task.cancel(with: .goingAway, reason: nil)
-                throw SamsungTVError.connectionTimedOut
-            }
-
-            do {
-                guard let value = try await group.next() else {
+        try await withTaskCancellationHandler {
+            try await withThrowingTaskGroup(of: String?.self) { group in
+                group.addTask {
+                    try await receiveChannelToken(from: task, pairing: pairing)
+                }
+                group.addTask {
+                    let nanos = UInt64(timeout * 1_000_000_000)
+                    try await Task.sleep(nanoseconds: nanos)
+                    task.cancel(with: .goingAway, reason: nil)
                     throw SamsungTVError.connectionTimedOut
                 }
-                group.cancelAll()
-                return value
-            } catch {
-                group.cancelAll()
-                throw error
+
+                do {
+                    guard let value = try await group.next() else {
+                        throw SamsungTVError.connectionTimedOut
+                    }
+                    group.cancelAll()
+                    return value
+                } catch {
+                    group.cancelAll()
+                    throw error
+                }
             }
+        } onCancel: {
+            task.cancel(with: .goingAway, reason: nil)
         }
     }
 
@@ -203,10 +237,43 @@ private struct ChannelEvent: Decodable {
     let data: EventData?
 }
 
-private struct WebSocketConnection {
+private struct WebSocketConnection: RemoteTransport, @unchecked Sendable {
     let task: URLSessionWebSocketTask
     let session: URLSession
     let trustDelegate: TVTrustDelegate
+
+    func send(_ message: String) async throws {
+        try await task.send(.string(message))
+    }
+
+    func receive() async throws {
+        let message = try await task.receive()
+        guard case let .string(text) = message,
+              let data = text.data(using: .utf8),
+              let event = try? JSONDecoder().decode(ChannelEvent.self, from: data) else { return }
+        if event.event == "ms.channel.unauthorized" { throw SamsungTVError.pairingRequired }
+        if event.event == "ms.error" { throw SamsungTVError.tvRejectedConnection }
+    }
+
+    func ping() async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { (completion: CheckedContinuation<Void, Error>) in
+                    task.sendPing { error in
+                        if let error { completion.resume(throwing: error) }
+                        else { completion.resume() }
+                    }
+                }
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(10))
+                close()
+                throw SamsungTVError.connectionTimedOut
+            }
+            defer { group.cancelAll() }
+            _ = try await group.next()
+        }
+    }
 
     func close() {
         task.cancel(with: .normalClosure, reason: nil)

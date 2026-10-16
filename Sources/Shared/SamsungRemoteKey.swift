@@ -1,6 +1,4 @@
-import AppIntents
-
-enum SamsungRemoteKey: String, AppEnum {
+enum SamsungRemoteKey: String {
     case up = "KEY_UP"
     case down = "KEY_DOWN"
     case left = "KEY_LEFT"
@@ -8,6 +6,17 @@ enum SamsungRemoteKey: String, AppEnum {
     case select = "KEY_ENTER"
     case back = "KEY_RETURN"
     case home = "KEY_HOME"
+    case numberPad = "KEY_MORE"
+    case digit0 = "KEY_0"
+    case digit1 = "KEY_1"
+    case digit2 = "KEY_2"
+    case digit3 = "KEY_3"
+    case digit4 = "KEY_4"
+    case digit5 = "KEY_5"
+    case digit6 = "KEY_6"
+    case digit7 = "KEY_7"
+    case digit8 = "KEY_8"
+    case digit9 = "KEY_9"
     case volumeUp = "KEY_VOLUP"
     case volumeDown = "KEY_VOLDOWN"
     case mute = "KEY_MUTE"
@@ -15,45 +24,50 @@ enum SamsungRemoteKey: String, AppEnum {
     case pause = "KEY_PAUSE"
     case powerOff = "KEY_POWEROFF"
 
-    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Samsung TV button")
+    var samsungCode: String { rawValue }
 
-    static var caseDisplayRepresentations: [SamsungRemoteKey: DisplayRepresentation] = [
-        .up: DisplayRepresentation(title: "Up"),
-        .down: DisplayRepresentation(title: "Down"),
-        .left: DisplayRepresentation(title: "Left"),
-        .right: DisplayRepresentation(title: "Right"),
-        .select: DisplayRepresentation(title: "Select"),
-        .back: DisplayRepresentation(title: "Back"),
-        .home: DisplayRepresentation(title: "Home"),
-        .volumeUp: DisplayRepresentation(title: "Volume Up"),
-        .volumeDown: DisplayRepresentation(title: "Volume Down"),
-        .mute: DisplayRepresentation(title: "Mute"),
-        .play: DisplayRepresentation(title: "Play"),
-        .pause: DisplayRepresentation(title: "Pause"),
-        .powerOff: DisplayRepresentation(title: "Power Off")
-    ]
-
-    private static let spokenNames: [SamsungRemoteKey: String] = [
-        .up: "Up",
-        .down: "Down",
-        .left: "Left",
-        .right: "Right",
-        .select: "Select",
-        .back: "Back",
-        .home: "Home",
-        .volumeUp: "Volume Up",
-        .volumeDown: "Volume Down",
-        .mute: "Mute",
-        .play: "Play",
-        .pause: "Pause",
-        .powerOff: "Power Off"
-    ]
-
-    var samsungCode: String {
-        rawValue
+    var digit: Int? {
+        switch self {
+        case .digit0: 0
+        case .digit1: 1
+        case .digit2: 2
+        case .digit3: 3
+        case .digit4: 4
+        case .digit5: 5
+        case .digit6: 6
+        case .digit7: 7
+        case .digit8: 8
+        case .digit9: 9
+        default: nil
+        }
     }
 
     var spokenName: String {
-        Self.spokenNames[self] ?? rawValue
+        switch self {
+        case .up: "Up"
+        case .down: "Down"
+        case .left: "Left"
+        case .right: "Right"
+        case .select: "Select"
+        case .back: "Back"
+        case .home: "Home"
+        case .numberPad: "Number Pad"
+        case .digit0: "0"
+        case .digit1: "1"
+        case .digit2: "2"
+        case .digit3: "3"
+        case .digit4: "4"
+        case .digit5: "5"
+        case .digit6: "6"
+        case .digit7: "7"
+        case .digit8: "8"
+        case .digit9: "9"
+        case .volumeUp: "Volume Up"
+        case .volumeDown: "Volume Down"
+        case .mute: "Mute"
+        case .play: "Play"
+        case .pause: "Pause"
+        case .powerOff: "Power Off"
+        }
     }
 }

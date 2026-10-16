@@ -76,7 +76,6 @@ enum PairingCredentialStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecAttrAccessGroup as String: SharedPreferences.appGroup,
             kSecUseDataProtectionKeychain as String: true
         ]
     }
@@ -87,6 +86,8 @@ enum CredentialStoreError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .keychain(errSecMissingEntitlement):
+            "This build is missing Keychain access. Select your signing Team in Xcode and rebuild the app."
         case let .keychain(status):
             "macOS could not access the saved TV pairing. Keychain error \(status)."
         }
