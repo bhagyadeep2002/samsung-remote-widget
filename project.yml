@@ -1,0 +1,66 @@
+name: SamsungTVRemote
+options:
+  bundleIdPrefix: com.indigital
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  xcodeVersion: "27.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+targets:
+  SamsungTVRemote:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/Shared
+      - Sources/App
+    dependencies:
+      - target: SamsungTVWidget
+        embed: true
+        link: false
+    info:
+      properties:
+        LSApplicationCategoryType: public.app-category.utilities
+        NSLocalNetworkUsageDescription: Connect to your Samsung TV on your home network to pair and send remote commands.
+    entitlements:
+      path: Config/SamsungTVRemote.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.application-groups:
+          - group.com.indigital.samsungtvremote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.indigital.samsungtvremote
+        PRODUCT_NAME: Samsung TV Remote
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+
+  SamsungTVWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Sources/Shared
+      - Sources/Widget
+    info:
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Config/SamsungTVWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.application-groups:
+          - group.com.indigital.samsungtvremote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.indigital.samsungtvremote.widget
+        PRODUCT_NAME: SamsungTVWidget
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        CODE_SIGN_STYLE: Automatic
