@@ -89,8 +89,9 @@ These timings use each device's own clock and do not measure TV execution.
 
 ## Finger gesture volume
 
-The current Watch build uses the finger motions in `samples/volume_up.MOV` and
-`samples/volume_down.MOV`. The classifier is trained on 17 recorded examples;
+The current Watch build uses privately recorded finger gestures. The source
+videos and raw sensor exports are excluded from this repository. The classifier
+is trained on 17 recorded examples;
 Up and Down were physically confirmed in preview after correcting GO timing.
 Live finger-to-TV behavior still needs hardware validation.
 
@@ -185,3 +186,23 @@ git push -u origin feature/apple-watch-motion-remote
 
 Generated Xcode projects, build products and local signing configuration stay
 ignored. Run `xcodegen generate` after moving the checkout or cloning it elsewhere.
+
+## Privacy when publishing
+
+Personal gesture videos, raw Watch exports, per-trial JSON reports and sensor
+plots are excluded from every published branch's history and ignored for future
+commits. Historical references to these filenames describe private local inputs;
+they are not files included with a clone. Aggregate assessment documents and the
+numeric classifier model remain to document and preserve the working recognizer.
+The model contains derived motion features, not raw streams or capture metadata.
+Reproducing the recorded-data analysis requires separately supplied recordings;
+the deterministic synthetic tests do not require those private files.
+
+Commit authors and committers have been anonymized. This checkout uses the local
+Git identity `Project Contributor <contributor@example.invalid>` for new commits;
+this identity does not link commits to a GitHub account. Other clones must set
+their own preferred private Git identity before committing.
+
+Existing Apple team and bundle identifiers remain in the build specification to
+preserve signing and installed-app compatibility. They are identifiers, not
+signing credentials. Pairing secrets remain in each platform's Keychain.

@@ -8,3 +8,21 @@ xcuserdata/
 *.xcworkspace/
 Config/*-Info.plist
 Config/*.entitlements
+
+# Private recordings and generated per-trial analysis stay local.
+samples/*.json
+samples/*.MOV
+samples/*.mov
+samples/*.mp4
+samples/*.png
+
+# Local credentials and signing exports.
+.env
+.env.*
+*.p12
+*.pfx
+*.mobileprovision
+*.keychain
+*.keychain-db
+*.pem
+*.key

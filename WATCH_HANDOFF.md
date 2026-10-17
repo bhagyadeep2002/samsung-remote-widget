@@ -1,5 +1,18 @@
 # Apple Watch motion remote: session handoff
 
+Privacy cleanup (2026-10-17): before any remote was configured, both local branches
+were rewritten to remove personal gesture videos, raw sensor exports, per-trial
+JSON analysis and sensor plots, and anonymize author/committer identities. Old
+commit hashes are superseded. A private backup of the original history and
+recordings is stored outside this repository under the user's Documents folder;
+never upload it. Ignore rules prevent accidental re-addition of these files.
+Historical sample filenames below refer to private inputs absent from a clone.
+Aggregate assessment documents, derived numeric classifier templates, signing
+identifiers and all application code are preserved. Source behavior is unchanged;
+no application or hardware tests were needed or run for this cleanup. Git history,
+identity, removed-path and content-preservation checks are recorded by the
+cleanup session. The Downloads repository remains an unchanged separate copy.
+
 Repository location (2026-10-17): the Watch working folder was moved to
 `~/Desktop/Projects/samsung-tv-remote-widget` and converted from a linked Codex
 worktree into an independent Git repository. History, `main`, the active
