@@ -2,6 +2,155 @@ import Foundation
 import XCTest
 
 final class PersistentRemoteConnectionTests: XCTestCase {
+    func testBoundedVolumeNeverConnectsOrSendsExpiredWork() async throws {
+        let socket = FakeTransport()
+        let factory = FakeConnector(sockets: [socket])
+        let remote = PersistentRemoteConnection { try await factory.connect($0) }
+        do {
+            try await remote.sendReady("up", host: "tv", valid: { true })
+            XCTFail("Cold volume must be rejected")
+        } catch is CancellationError { }
+        let coldHosts = await factory.hosts
+        XCTAssertTrue(coldHosts.isEmpty)
+        try await remote.prepare(host: "tv")
+        do {
+            try await remote.sendReady("old-up", host: "tv", valid: { false })
+            XCTFail("Expired volume must be rejected at the write boundary")
+        } catch is CancellationError { }
+        XCTAssertTrue(socket.messages.isEmpty)
+        try await remote.sendReady("fresh-down", host: "tv", valid: { true })
+        XCTAssertEqual(socket.messages, ["fresh-down"])
+        await remote.disconnect()
+    }
+
+    func testBoundedVolumeIsRejectedDuringHandshakeAndAfterDisconnect() async throws {
+        let gate = Gate()
+        let socket = FakeTransport()
+        let remote = PersistentRemoteConnection { _ in await gate.wait(); return socket }
+        let warmup = Task { try await remote.prepare(host: "tv") }
+        await gate.waitUntilEntered()
+        do {
+            try await remote.sendReady("up", host: "tv", valid: { true })
+            XCTFail("Must not wait through a handshake")
+        } catch is CancellationError { }
+        await gate.open()
+        try await warmup.value
+        await remote.disconnect()
+        do {
+            try await remote.sendReady("down", host: "tv", valid: { true })
+            XCTFail("Must not reconnect")
+        } catch is CancellationError { }
+        XCTAssertTrue(socket.messages.isEmpty)
+    }
+
+    func testBoundedVolumeDropsConcurrentInputAndDoesNotReplayFailedWrite() async throws {
+        let writeGate = Gate()
+        let socket = FakeTransport(failWrites: true, writeGate: writeGate)
+        let remote = PersistentRemoteConnection { _ in socket }
+        await remote.adopt(socket, host: "tv")
+        let first = Task { try await remote.sendReady("up", host: "tv", valid: { true }) }
+        await writeGate.waitUntilEntered()
+        do {
+            try await remote.sendReady("down", host: "tv", valid: { true })
+            XCTFail("Must not queue concurrent input")
+        } catch is CancellationError { }
+        do {
+            try await remote.send("ordinary-key", host: "tv")
+            XCTFail("Ordinary commands cannot interleave with bounded volume")
+        } catch is CancellationError { }
+        await writeGate.open()
+        do { try await first.value; XCTFail("Expected failure") } catch FakeError.offline { }
+        XCTAssertEqual(socket.messages, ["up"])
+        XCTAssertTrue(socket.isClosed)
+        await remote.disconnect()
+    }
+
+    func testReceiveFailureRevokesVolumePermitBeforeFreshInput() async throws {
+        let lost = expectation(description: "Receive failure revokes live session")
+        let gate = VolumeRelayGate()
+        let socket = FakeTransport()
+        let remote = PersistentRemoteConnection(onDisconnect: {
+            if gate.hasLease(now: 0) {
+                gate.cancel()
+                lost.fulfill()
+            }
+        }) { _ in socket }
+        await remote.adopt(socket, host: "tv")
+        let id = gate.begin(now: 0)
+        let permit = try XCTUnwrap(gate.issue(session: id, now: 0))
+        let step = VolumeBridgeMessage(kind: "step", sessionID: id, permitID: permit,
+                                       sequence: 1, direction: "up")
+        let deadline = try XCTUnwrap(gate.consume(step, now: 0.1))
+        socket.close()
+        await fulfillment(of: [lost], timeout: 2)
+        XCTAssertFalse(gate.valid(session: id, deadline: deadline, now: 0.2))
+        do {
+            try await remote.sendReady("stale-up", host: "tv", valid: {
+                gate.valid(session: id, deadline: deadline, now: 0.2)
+            })
+            XCTFail("Receive loss must not reconnect and replay volume")
+        } catch is CancellationError { }
+        XCTAssertTrue(socket.messages.isEmpty)
+        await remote.disconnect()
+    }
+
+    func testMotionCancellationDuringDelayedAdmissionPreventsSocketWrite() async throws {
+        let socket = FakeTransport()
+        let remote = PersistentRemoteConnection { _ in socket }
+        await remote.adopt(socket, host: "tv")
+        let validity = VolumeRelayGate()
+        let session = validity.begin(now: 0)
+        XCTAssertTrue(validity.beginMotion(session: session, activation: "motion", sequence: 1, now: 0))
+        let permit = try XCTUnwrap(validity.issue(session: session, now: 0, activation: "motion", activationSequence: 1))
+        let request = VolumeBridgeMessage(kind: "motionStep", sessionID: session, permitID: permit,
+            activationID: "motion", activationSequence: 1, sequence: 1, direction: "up")
+        let deadline = try XCTUnwrap(validity.consume(request, now: 0.1))
+        let admissionGate = Gate()
+        let send = Task {
+            await admissionGate.wait()
+            try await remote.sendReady("up", host: "tv", valid: {
+                validity.valid(session: session, deadline: deadline, now: 0.2,
+                    activation: "motion", activationSequence: 1)
+            })
+        }
+        await admissionGate.waitUntilEntered()
+        validity.endMotion(session: session, activation: "motion", sequence: 1)
+        await admissionGate.open()
+        do { try await send.value; XCTFail("Cancelled activation must never reach the socket") }
+        catch is CancellationError { }
+        XCTAssertTrue(socket.messages.isEmpty)
+        await remote.disconnect()
+    }
+
+    func testMotionStopAllowsOnlyAnAlreadyStartedWriteAndNoQueuedFollowup() async throws {
+        let writes = Gate()
+        let socket = FakeTransport(writeGate: writes)
+        let remote = PersistentRemoteConnection { _ in socket }
+        await remote.adopt(socket, host: "tv")
+        let validity = VolumeRelayGate()
+        let session = validity.begin(now: 0)
+        XCTAssertTrue(validity.beginMotion(session: session, activation: "motion", sequence: 1, now: 0))
+        let send = Task {
+            try await remote.sendReady("already-started", host: "tv", valid: {
+                validity.valid(session: session, deadline: 0.5, now: 0.1,
+                    activation: "motion", activationSequence: 1)
+            })
+        }
+        await writes.waitUntilEntered()
+        validity.endMotion(session: session, activation: "motion", sequence: 1)
+        do {
+            try await remote.sendReady("late", host: "tv", valid: {
+                validity.valid(session: session, deadline: 0.5, now: 0.2,
+                    activation: "motion", activationSequence: 1)
+            })
+            XCTFail("No follow-up may be queued")
+        } catch is CancellationError { }
+        await writes.open()
+        try await send.value
+        XCTAssertEqual(socket.messages, ["already-started"])
+        await remote.disconnect()
+    }
+
     func testBatchesCannotInterleaveDuringAnimationDelays() async throws {
         let socket = FakeTransport()
         let remote = PersistentRemoteConnection { _ in socket }
@@ -208,11 +357,13 @@ private final class FakeTransport: RemoteTransport, @unchecked Sendable {
     private var activeWrites = 0
     private var maximumWrites = 0
     private var receiver: CheckedContinuation<Void, Error>?
+    private let writeGate: Gate?
     private let failWrites: Bool
     private let failPings: Bool
     private let onPing: @Sendable () -> Void
 
-    init(failWrites: Bool = false, failPings: Bool = false, onPing: @escaping @Sendable () -> Void = {}) {
+    init(failWrites: Bool = false, failPings: Bool = false, writeGate: Gate? = nil, onPing: @escaping @Sendable () -> Void = {}) {
+        self.writeGate = writeGate
         self.failWrites = failWrites
         self.failPings = failPings
         self.onPing = onPing
@@ -229,6 +380,7 @@ private final class FakeTransport: RemoteTransport, @unchecked Sendable {
             maximumWrites = max(maximumWrites, activeWrites)
         }
         defer { lock.withLock { activeWrites -= 1 } }
+        if let writeGate { await writeGate.wait() }
         await Task.yield()
         if failWrites || isClosed { throw FakeError.offline }
     }

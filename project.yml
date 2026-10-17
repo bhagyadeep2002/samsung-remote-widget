@@ -3,6 +3,8 @@ options:
   bundleIdPrefix: com.indigital
   deploymentTarget:
     macOS: "14.0"
+    iOS: "17.0"
+    watchOS: "10.0"
   createIntermediateGroups: true
   xcodeVersion: "27.0"
 
@@ -19,6 +21,14 @@ schemes:
     test:
       targets:
         - RemoteConnectionTests
+  SamsungTVRemoteiOS:
+    build:
+      targets:
+        SamsungTVRemoteiOS: all
+  SamsungTVRemoteWatch:
+    build:
+      targets:
+        SamsungTVRemoteWatch: all
 
 targets:
   SamsungTVRemote:
@@ -48,6 +58,63 @@ targets:
         DEVELOPMENT_TEAM: 43S9G46H25
         ENABLE_HARDENED_RUNTIME: YES
 
+  SamsungTVRemoteiOS:
+    type: application
+    platform: iOS
+    sources:
+      - Sources/iOS
+      - Sources/Shared
+      - Sources/Bridge
+    dependencies:
+      - target: SamsungTVRemoteWatch
+        embed: true
+    info:
+      path: Config/SamsungTVRemote-iOS-Info.plist
+      properties:
+        CFBundleDisplayName: Samsung TV Remote
+        NSLocalNetworkUsageDescription: Pair with and send remote commands to your Samsung TV on your local network.
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        "UISupportedInterfaceOrientations~ipad":
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.indigital.samsungtvremote.ios
+        PRODUCT_NAME: Samsung TV Remote
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 43S9G46H25
+
+  SamsungTVRemoteWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - Sources/Watch
+      - Sources/Gesture
+      - Sources/Bridge
+    info:
+      path: Config/SamsungTVRemote-Watch-Info.plist
+      properties:
+        CFBundleDisplayName: Samsung TV Remote
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.indigital.samsungtvremote.ios
+        NSMotionUsageDescription: Motion is used only while wrist-twist volume control is explicitly active.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.indigital.samsungtvremote.ios.watchkitapp
+        PRODUCT_NAME: Samsung TV Remote Watch
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 43S9G46H25
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/Frameworks
+        SKIP_INSTALL: YES
+
   RemoteConnectionTests:
     type: bundle.unit-test
     platform: macOS
@@ -56,6 +123,9 @@ targets:
       - Sources/Shared/PersistentRemoteConnection.swift
       - Sources/Shared/TVNumberPadNavigation.swift
       - Sources/Shared/SamsungRemoteKey.swift
+      - Sources/Bridge/VolumeBridge.swift
+      - Sources/Bridge/FingerGestureRecording.swift
+      - Sources/Gesture
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.indigital.samsungtvremote.connectiontests

@@ -5,9 +5,19 @@ import Security
 enum SamsungTVClient {
     private static let pairingTimeout: TimeInterval = 45
     private static let commandTimeout: TimeInterval = 10
+    #if os(iOS)
+    static let volumeGate = VolumeRelayGate()
+    private static let remote = PersistentRemoteConnection(
+        reconnectDuringMaintenance: false,
+        onDisconnect: { volumeGate.cancel() }
+    ) { host in
+        try await authenticatedConnection(host: host)
+    }
+    #else
     private static let remote = PersistentRemoteConnection { host in
         try await authenticatedConnection(host: host)
     }
+    #endif
     private static let controls = TVRemoteControlSession { steps in
         let host = try normalizedHost(SharedPreferences.host)
         let commands = try steps.map { step in
@@ -15,6 +25,22 @@ enum SamsungTVClient {
         }
         try await remote.send(commands, host: host)
     }
+
+    #if os(iOS)
+    static func isReady() async -> Bool {
+        await remote.isReady(host: SharedPreferences.host)
+    }
+
+    static func sendVolume(up: Bool, session: String, deadline: TimeInterval,
+                           activation: String? = nil, activationSequence: Int? = nil) async throws {
+        let host = try normalizedHost(SharedPreferences.host)
+        try await remote.sendReady(message(for: up ? .volumeUp : .volumeDown), host: host) {
+            volumeGate.valid(session: session, deadline: deadline,
+                             now: ProcessInfo.processInfo.systemUptime,
+                             activation: activation, activationSequence: activationSequence)
+        }
+    }
+    #endif
 
     static func prepare() async throws {
         try await remote.prepare(host: normalizedHost(SharedPreferences.host))
@@ -48,6 +74,7 @@ enum SamsungTVClient {
             throw SamsungTVError.pairingDidNotReturnCredentials
         }
 
+        try Task.checkCancellation()
         try PairingCredentialStore.save(
             token: token,
             certificatePin: certificatePin,

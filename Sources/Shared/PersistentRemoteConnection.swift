@@ -42,12 +42,19 @@ actor PersistentRemoteConnection {
     private var maintenance: Task<Void, Never>?
     private var worker: Task<Void, Never>?
     private var commands: [Command] = []
+    private var boundedWriteInFlight = false
+    private let reconnectDuringMaintenance: Bool
+    private let onDisconnect: @Sendable () -> Void
 
     init(
         keepaliveInterval: Duration = .seconds(15),
+        reconnectDuringMaintenance: Bool = true,
+        onDisconnect: @escaping @Sendable () -> Void = {},
         connect: @escaping @Sendable (String) async throws -> any RemoteTransport
     ) {
         self.keepaliveInterval = keepaliveInterval
+        self.reconnectDuringMaintenance = reconnectDuringMaintenance
+        self.onDisconnect = onDisconnect
         self.connect = connect
     }
 
@@ -71,6 +78,7 @@ actor PersistentRemoteConnection {
 
     /// A batch stays on one connection and cannot interleave with another click.
     func send(_ steps: [RemoteCommandStep], host: String) async throws {
+        guard !boundedWriteInFlight else { throw CancellationError() }
         selectHost(host)
         startMaintenance()
         try await withCheckedThrowingContinuation { completion in
@@ -81,7 +89,26 @@ actor PersistentRemoteConnection {
         }
     }
 
+    func isReady(host: String) -> Bool {
+        self.host == host && connection != nil
+    }
+
+    /// Mobile volume has no queue and never waits for authentication/reconnection.
+    func sendReady(_ message: String, host: String,
+                   valid: @Sendable () -> Bool) async throws {
+        guard self.host == host, let ready = connection,
+              !boundedWriteInFlight, worker == nil, valid() else {
+            throw CancellationError()
+        }
+        boundedWriteInFlight = true
+        defer { boundedWriteInFlight = false }
+        // No suspension between the final validity check and starting the write.
+        do { try await ready.transport.send(message) }
+        catch { invalidate(ready.id); throw error }
+    }
+
     func disconnect() {
+        onDisconnect()
         generation = UUID()
         host = nil
         attempt?.task.cancel()
@@ -150,6 +177,8 @@ actor PersistentRemoteConnection {
 
     private func invalidate(_ id: UUID) {
         guard connection?.id == id else { return }
+        onDisconnect()
+        failQueuedCommands(with: CancellationError())
         connection?.transport.close()
         connection = nil
         receiver?.cancel()
@@ -205,6 +234,7 @@ actor PersistentRemoteConnection {
 
     private func maintain(generation: UUID) async {
         guard self.generation == generation, let host else { return }
+        if !reconnectDuringMaintenance && connection == nil { return }
         var usedConnection: Connection?
         do {
             let ready = try await connected(to: host)

@@ -51,6 +51,9 @@ enum PairingCredentialStore {
         if updateStatus == errSecItemNotFound {
             var insert = query
             insert[kSecValueData as String] = data
+            #if os(iOS)
+            insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            #endif
             let insertStatus = SecItemAdd(insert as CFDictionary, nil)
             guard insertStatus == errSecSuccess else {
                 throw CredentialStoreError.keychain(insertStatus)
@@ -89,7 +92,7 @@ enum CredentialStoreError: LocalizedError {
         case .keychain(errSecMissingEntitlement):
             "This build is missing Keychain access. Select your signing Team in Xcode and rebuild the app."
         case let .keychain(status):
-            "macOS could not access the saved TV pairing. Keychain error \(status)."
+            "Could not access the saved TV pairing. Keychain error \(status)."
         }
     }
 }
